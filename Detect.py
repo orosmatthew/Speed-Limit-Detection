@@ -193,11 +193,15 @@ while True:
 				print("Limit: 80")
 			elif "85" in text:
 				print("Limit: 85")
-	
+		
+		#draw red rectangle over sign
+		cv2.rectangle(img, (x, y), (x+w, y+h), (0, 0, 255), 2)
+		
 	#show webcam
 	cv2.imshow('Webcam', img)
 	
 	if cv2.waitKey(1) == 27: 
+		cam.release()
 		break  # esc to quit
 		
 cv2.destroyAllWindows()
