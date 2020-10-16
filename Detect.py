@@ -23,6 +23,11 @@ pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tessera
 
 #set up webcam
 cam = cv2.VideoCapture(1)
+cam.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+#
+limit = 0
 
 #used to correct text skewing
 def correct_skew(image, delta=1, limit=5):
@@ -107,7 +112,7 @@ while True:
 		image = img[y:y+h, x:x+w]
 		orig = image.copy()
 		(origH, origW) = image.shape[:2]
-
+		
 		(newW, newH) = (320, 320)
 		rW = origW / float(newW)
 		rH = origH / float(newH)
@@ -163,39 +168,73 @@ while True:
 			#print text result
 			if "10" in text:
 				print("Limit: 10")
+				limit = 10
 			elif "15" in text:
 				print("Limit: 15")
+				limit = 15
 			elif "20" in text:
 				print("Limit: 20")
+				limit = 20
 			elif "25" in text:
 				print("Limit: 25")
+				limit = 25
 			elif "30" in text:
 				print("Limit: 30")
+				limit = 30
 			elif "35" in text:
 				print("Limit: 35")
+				limit = 35
 			elif "40" in text:
 				print("Limit: 40")
+				limit = 40
 			elif "45" in text:
 				print("Limit: 45")
+				limit = 45
 			elif "50" in text:
 				print("Limit: 50")
+				limit = 50
 			elif "55" in text:
 				print("Limit: 55")
+				limit = 55
 			elif "60" in text:
 				print("Limit: 60")
+				limit = 60
 			elif "65" in text:
 				print("Limit: 65")
+				limit = 65
 			elif "70" in text:
 				print("Limit: 70")
+				limit = 70
 			elif "75" in text:
 				print("Limit: 75")
+				limit = 75
 			elif "80" in text:
 				print("Limit: 80")
+				limit = 80
 			elif "85" in text:
 				print("Limit: 85")
+				limit = 85
 		
 		#draw red rectangle over sign
 		cv2.rectangle(img, (x, y), (x+w, y+h), (0, 0, 255), 2)
+		
+	#draw speed limit
+	font = cv2.FONT_HERSHEY_SIMPLEX
+	bottomLeftCornerOfText = (50,50)
+	fontScale = 1
+	fontColor = (0,0,255)
+	lineType = 2
+
+	cv2.rectangle(img, (25, 15), (325, 70), (0,0,0), -1)
+	
+	cv2.putText(img,"Speed Limit: " + str(limit), 
+		bottomLeftCornerOfText, 
+		font, 
+		fontScale,
+		fontColor,
+		lineType)
+		
+	
 		
 	#show webcam
 	cv2.imshow('Webcam', img)
