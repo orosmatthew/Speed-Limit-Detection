@@ -1,246 +1,215 @@
-#imports
+# imports
+
 import numpy as np
 import cv2
 import pytesseract
 import time
-import imutils
-import argparse
 from scipy.ndimage import interpolation as inter
-from imutils.object_detection import non_max_suppression
+import threading
 
-#get sign classifier
-sign_cascade = cv2.CascadeClassifier(r"C:\Users\orosm\Desktop\Speed Limit Python Env\Speedlimit_HAAR_ 16Stages.xml")
+# get sign classifier
 
-#set up EAST text detection
-layerNames = [
-	"feature_fusion/Conv_7/Sigmoid",
-	"feature_fusion/concat_3"]
+sign_cascade = \
+	cv2.CascadeClassifier(r"D:\STUFF\Programming\Speed-Limit-Detection\Speedlimit_HAAR_ 16Stages.xml"
+						  )
 
-net = cv2.dnn.readNet(r"C:\Users\orosm\Desktop\Speed Limit Python Env\frozen_east_text_detection.pb")
+# set up pytesseract for OCR
 
-#set up pytesseract for OCR
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+pytesseract.pytesseract.tesseract_cmd = \
+	r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
-#set up webcam
-cam = cv2.VideoCapture(1)
-cam.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+# set up webcam
 
-#
+cam = cv2.VideoCapture(1, cv2.CAP_DSHOW)
+cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
+
+detect_queue = []
+
 limit = 0
 
-#used to correct text skewing
-def correct_skew(image, delta=1, limit=5):
-    def determine_score(arr, angle):
-        data = inter.rotate(arr, angle, reshape=False, order=0)
-        histogram = np.sum(data, axis=1)
-        score = np.sum((histogram[1:] - histogram[:-1]) ** 2)
-        return histogram, score
+end = False
 
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1] 
 
-    scores = []
-    angles = np.arange(-limit, limit + delta, delta)
-    for angle in angles:
-        histogram, score = determine_score(thresh, angle)
-        scores.append(score)
+# detect thread in separate thread
 
-    best_angle = angles[scores.index(max(scores))]
+def detect_text():
+	global detect_queue
+	global limit
+	global end
+	while True:
 
-    (h, w) = image.shape[:2]
-    center = (w // 2, h // 2)
-    M = cv2.getRotationMatrix2D(center, best_angle, 1.0)
-    rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, \
-              borderMode=cv2.BORDER_REPLICATE)
+		if end == True:
+			return
 
-    return best_angle, rotated
-
-#used for EAST text detection algorithm
-def decode_predictions(scores, geometry):
-
-	(numRows, numCols) = scores.shape[2:4]
-	rects = []
-	confidences = []
-
-	for y in range(0, numRows):
-		scoresData = scores[0, 0, y]
-		xData0 = geometry[0, 0, y]
-		xData1 = geometry[0, 1, y]
-		xData2 = geometry[0, 2, y]
-		xData3 = geometry[0, 3, y]
-		anglesData = geometry[0, 4, y]
-
-		for x in range(0, numCols):
-			if scoresData[x] < 0.4:
-				continue
-
-			(offsetX, offsetY) = (x * 4.0, y * 4.0)
-
-			angle = anglesData[x]
-			cos = np.cos(angle)
-			sin = np.sin(angle)
-
-			h = xData0[x] + xData2[x]
-			w = xData1[x] + xData3[x]
-
-			endX = int(offsetX + (cos * xData1[x]) + (sin * xData2[x]))
-			endY = int(offsetY - (sin * xData1[x]) + (cos * xData2[x]))
-			startX = int(endX - w)
-			startY = int(endY - h)
-
-			rects.append((startX, startY, endX, endY))
-			confidences.append(scoresData[x])
-
-	return (rects, confidences)
-
-#main loop
-while True:
-	
-	#read camera
-	ret_val, img = cam.read()
-	#convert to gray
-	gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-	
-	#detect signs
-	signs = sign_cascade.detectMultiScale(gray, 1.05, 3)
-	
-	#loop through signs
-	for (x,y,w,h) in signs:
-		
-		#copy and resize image
-		image = img[y:y+h, x:x+w]
-		orig = image.copy()
-		(origH, origW) = image.shape[:2]
-		
-		(newW, newH) = (320, 320)
-		rW = origW / float(newW)
-		rH = origH / float(newH)
-
-		image = cv2.resize(image, (newW, newH))
-		(H, W) = image.shape[:2]
-
-		#propagate EAST network
-		blob = cv2.dnn.blobFromImage(image, 1.0, (W, H),
-			(123.68, 116.78, 103.94), swapRB=True, crop=False)
-		net.setInput(blob)
-		(scores, geometry) = net.forward(layerNames)
-
-		#handle EAST output
-		(rects, confidences) = decode_predictions(scores, geometry)
-		boxes = non_max_suppression(np.array(rects), probs=confidences)
-		
-		#text output results
-		results = []
-		
-		#loop through text lines within sign
-		for (startX, startY, endX, endY) in boxes:
-			
-			#scale boxes and add padding
-			startX = int(startX * rW)
-			startY = int(startY * rH)
-			endX = int(endX * rW)
-			endY = int(endY * rH)
-
-			dX = int((endX - startX) * 0.15)
-			dY = int((endY - startY) * 0.15)
-
-			startX = max(0, startX - dX)
-			startY = max(0, startY - dY)
-			endX = min(origW, endX + (dX * 2))
-			endY = min(origH, endY + (dY * 2))
-			roi = orig[startY:endY, startX:endX]
-			
-			#correct skewed text
-			cor = correct_skew(roi)
-			
-			#run pytesseract and get resulting text from EAST detection
-			config = ("-l eng --oem 1 --psm 7 digits")
+		if len(detect_queue) != 0:
+			img = detect_queue[0]
+			config = '-l eng --oem 1 --psm 11 digits'
 			text = pytesseract.image_to_string(cor[1], config=config)
-			results.append(((startX, startY, endX, endY), text))
-			
-		#sort results
-		results = sorted(results, key=lambda r:r[0][1])
-		
-		#loop through text results
-		for ((startX, startY, endX, endY), text) in results:
 
-			#print text result
-			if "10" in text:
-				print("Limit: 10")
+			if '10' in text:
+				print('Limit: 10')
 				limit = 10
-			elif "15" in text:
-				print("Limit: 15")
+			elif '15' in text:
+				print('Limit: 15')
 				limit = 15
-			elif "20" in text:
-				print("Limit: 20")
+			elif '20' in text:
+				print('Limit: 20')
 				limit = 20
-			elif "25" in text:
-				print("Limit: 25")
+			elif '25' in text:
+				print('Limit: 25')
 				limit = 25
-			elif "30" in text:
-				print("Limit: 30")
+			elif '30' in text:
+				print('Limit: 30')
 				limit = 30
-			elif "35" in text:
-				print("Limit: 35")
+			elif '35' in text:
+				print('Limit: 35')
 				limit = 35
-			elif "40" in text:
-				print("Limit: 40")
+			elif '40' in text:
+				print('Limit: 40')
 				limit = 40
-			elif "45" in text:
-				print("Limit: 45")
+			elif '45' in text:
+				print('Limit: 45')
 				limit = 45
-			elif "50" in text:
-				print("Limit: 50")
+			elif '50' in text:
+				print('Limit: 50')
 				limit = 50
-			elif "55" in text:
-				print("Limit: 55")
+			elif '55' in text:
+				print('Limit: 55')
 				limit = 55
-			elif "60" in text:
-				print("Limit: 60")
+			elif '60' in text:
+				print('Limit: 60')
 				limit = 60
-			elif "65" in text:
-				print("Limit: 65")
+			elif '65' in text:
+				print('Limit: 65')
 				limit = 65
-			elif "70" in text:
-				print("Limit: 70")
+			elif '70' in text:
+				print('Limit: 70')
 				limit = 70
-			elif "75" in text:
-				print("Limit: 75")
+			elif '75' in text:
+				print('Limit: 75')
 				limit = 75
-			elif "80" in text:
-				print("Limit: 80")
+			elif '80' in text:
+				print('Limit: 80')
 				limit = 80
-			elif "85" in text:
-				print("Limit: 85")
+			elif '85' in text:
+				print('Limit: 85')
 				limit = 85
-		
-		#draw red rectangle over sign
-		cv2.rectangle(img, (x, y), (x+w, y+h), (0, 0, 255), 2)
-		
-	#draw speed limit
+
+			detect_queue.pop(0)
+		else:
+
+			time.sleep(0.25)
+
+
+# used to correct text skewing
+
+def correct_skew(image, delta=1, limit=5):
+
+	def determine_score(arr, angle):
+		data = inter.rotate(arr, angle, reshape=False, order=0)
+		histogram = np.sum(data, axis=1)
+		score = np.sum((histogram[1:] - histogram[:-1]) ** 2)
+		return (histogram, score)
+
+	gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+	thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV
+						   + cv2.THRESH_OTSU)[1]
+
+	scores = []
+	angles = np.arange(-limit, limit + delta, delta)
+	for angle in angles:
+		(histogram, score) = determine_score(thresh, angle)
+		scores.append(score)
+
+	best_angle = angles[scores.index(max(scores))]
+
+	(h, w) = image.shape[:2]
+	center = (w // 2, h // 2)
+	M = cv2.getRotationMatrix2D(center, best_angle, 1.0)
+	rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC,
+							 borderMode=cv2.BORDER_REPLICATE)
+
+	return (best_angle, rotated)
+
+
+d_thread = threading.Thread(target=detect_text, args=())
+d_thread.start()
+
+# main loop
+
+while True:
+
+	# read camera
+
+	(ret_val, img) = cam.read()
+
+	# convert to gray
+
+	gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+	# detect signs
+
+	signs = sign_cascade.detectMultiScale(gray, 1.05, 3)
+
+	# loop through signs
+
+	for (x, y, w, h) in signs:
+
+		# scale image
+
+		sign_img = img[y:y + h, x:x + w]
+
+		x_scale_percent = 87
+		y_scale_percent = 95
+		width = int(sign_img.shape[1] * x_scale_percent / 100)
+		height = int(sign_img.shape[0] * y_scale_percent / 100)
+		dim = (width, height)
+		resized = cv2.resize(sign_img, dim,
+							 interpolation=cv2.INTER_AREA)
+
+		# correct skewed text
+
+		cor = correct_skew(resized)
+
+		if len(detect_queue) >= 10:
+			detect_queue.pop(0)
+		detect_queue.append(cor[1])
+
+		time.sleep(0.075)
+
+		# draw red rectangle over sign
+
+		cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 255), 2)
+
+	# draw speed limit
+
 	font = cv2.FONT_HERSHEY_SIMPLEX
-	bottomLeftCornerOfText = (50,50)
+	bottomLeftCornerOfText = (50, 50)
 	fontScale = 1
-	fontColor = (0,0,255)
+	fontColor = (0, 0, 255)
 	lineType = 2
 
-	cv2.rectangle(img, (25, 15), (325, 70), (0,0,0), -1)
-	
-	cv2.putText(img,"Speed Limit: " + str(limit), 
-		bottomLeftCornerOfText, 
-		font, 
+	cv2.rectangle(img, (25, 15), (325, 70), (0, 0, 0), -1)
+
+	cv2.putText(
+		img,
+		'Speed Limit: ' + str(limit),
+		bottomLeftCornerOfText,
+		font,
 		fontScale,
 		fontColor,
-		lineType)
-		
-	
-		
-	#show webcam
+		lineType,
+		)
+
+	# show webcam
+
 	cv2.imshow('Webcam', img)
-	
-	if cv2.waitKey(1) == 27: 
+
+	if cv2.waitKey(1) == 27:
 		cam.release()
 		break  # esc to quit
-		
+
 cv2.destroyAllWindows()
+
+end = True
